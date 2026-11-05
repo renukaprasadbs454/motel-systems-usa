@@ -1,0 +1,1090 @@
+EXORA HOSPITALITY INTELLIGENCE | PRODUCT & ENGINEERING
+
+EXORA
+
+HOSPITALITY
+INTELLIGENCE
+
+Complete Build Project Specification
+
+Dynamic Room-Price Recommendation Engine + Unified Operations & Financial Intelligence
+
+  PROJECT PURPOSE
+
+   Build an independent, explainable pricing recommendation engine using a shared hotel-revenue data foundation. Start
+   from the publicly documented functional baseline of ChoiceADVANTAGE and Wyndham RevIQ, then add the extra signals
+   needed to make recommendations more contextual, measurable and useful. Exora will not copy proprietary algorithms or
+   depend on restricted outputs.
+
+Prepared for: Exora project team and motel prospect
+Properties in discovery: Travelodge Fargo West Acres (~70 rooms) and Quality Suites Fargo West Acres (~50 rooms)
+
+Version 1.0 | 04 November 2026 | Status: Proposed build specification, subject to client data and vendor access validation
+Confidential working document. Product capabilities and data access statements are separated into client-reported facts, public documentation
+and items requiring confirmation.
+
+                                                                                              EXORA | INTERNAL WORKING SPECIFICATION | PAGE 1
+EXORA HOSPITALITY INTELLIGENCE | PRODUCT & ENGINEERING
+
+Document map
+
+Section  Contents
+1        Executive summary and product thesis
+2        Client context and current systems
+3        What is documented about the incumbent tools
+4        Target product scope and operating model
+5        Data strategy and variable catalogue
+6        Metrics and definitions
+7        Pricing recommendation methodology
+8        System architecture and flows
+9        Data model and ingestion contracts
+10       Dashboard, reporting and AI experience
+11       Security, governance and contractual controls
+12       Testing, backtesting and success measures
+13       Implementation roadmap and acceptance criteria
+14       Risks, assumptions and discovery checklist
+15       References and source notes
+
+READ THIS FIRST
+
+This document is a build specification, not proof that every API, export field, licensing term or client workflow has been
+confirmed. The first project gate is to inspect both properties' actual CSV exports and obtain the applicable
+franchise/vendor permissions.
+
+1. Executive summary and product thesis
+
+The prospect operates two franchise-affiliated motels in Fargo, North Dakota: Travelodge Fargo West Acres,
+associated with Wyndham Hotels & Resorts, and Quality Suites, associated with Choice Hotels. The working
+room-count assumptions are approximately 70 rooms and 50 rooms respectively (about 120 total); confirm exact
+sellable inventory and room classes with the client.
+
+The properties already use hotel reservation/property systems and pricing or revenue-management functionality.
+The project is not to replace their franchise systems. Exora should sit above permitted source systems as a
+decision-support and analytics layer.
+
+The central build is an independent pricing recommendation engine. It will use the business signals that are
+publicly documented in the incumbent systems' revenue-management descriptions--especially historical property
+performance and projected occupancy--and extend that baseline with booking pace, inventory availability, rate
+history, competitor data, event and weather context, channel economics and property-specific positioning where
+data supports those features.
+
+The platform should also consolidate daily/night operational and financial reports, because the client described a
+manual management burden around ADR, cash flow, revenue excluding tax, discrepancies, no-shows,
+cancellations and the hotel ledger. That reporting capability shares the same data foundation but is a distinct
+product module from the pricing algorithm.
+
+                                                         EXORA | INTERNAL WORKING SPECIFICATION | PAGE 2
+EXORA HOSPITALITY INTELLIGENCE | PRODUCT & ENGINEERING
+
+  PRODUCT POSITIONING
+
+   Exora Hospitality Intelligence = a unified data platform + a hotel pricing decision engine + operations/financial analytics +
+   an explainable management interface. The pricing engine is the core differentiator; AI is used to interpret documents and
+   explain validated calculations, not to invent financial numbers or independently control prices.
+
+1.1 Business outcomes sought
+
+ Recommend a room rate for each property, stay date and supported room class, with an explanation of why the rate is
+     recommended.
+
+ Forecast demand and occupancy early enough for managers to act on future dates, not just summarize yesterday.
+ Compare each property against a relevant, normalized competitive set rather than comparing unqualified public prices.
+ Bring both properties into one view while respecting the different franchise ecosystems and each property's own rules.
+ Reduce the manager's manual effort reviewing daily/night reports and surface important exceptions.
+ Allow a human manager to approve, edit or reject a recommendation before any production rate change.
+
+2. Client context and current systems
+
+2.1 Properties and franchise relationships
+
+Property              Franchise / brand        Reported system              Room-     Validation needed
+                      relationship                                          count
+                                               SynXis (specific             assumpti  Confirm property-system module, revIQ
+Travelodge Fargo West Wyndham Hotels &         module/version to confirm);  on        entitlement/version, rate push path,
+                                               client reports revIQ in the  ~70       room classes, exact inventory.
+Acres                 Resorts / Travelodge     pricing workflow
+                                                                            ~50       Confirm active ChoiceADVANTAGE
+Quality Suites Fargo  Choice Hotels            ChoiceADVANTAGE                        modules, revenue-management
+West Acres            International / Quality                                         capability enabled, export fields and any
+                      Suites                                                          separate tool.
+
+Client-reported context: bookings arrive from multiple booking platforms; the properties already have franchise software; daily/night
+reports are produced; CSV exports are available; room prices may be reconsidered multiple times on busy days and less frequently on
+quieter days; the client stated there are no franchise restrictions on setting prices. That last statement must be distinguis hed from
+permission to integrate third-party software or automate rate publishing.
+
+2.2 Current-system visual: end-to-end workflow
+
+                                                                            EXORA | INTERNAL WORKING SPECIFICATION | PAGE 3
+EXORA HOSPITALITY INTELLIGENCE | PRODUCT & ENGINEERING
+
+ Figure 1. Client-provided/generated illustration of the current operating workflow. Treat system details as a discovery illustration, not a verified
+                                                                                      integration map.
+
+2.3 Where revIQ participates
+
+      Figure 2. Illustration of revIQ as a revenue-management recommendation layer between property data and the manager's rate-update
+                                                                                          workflow.
+
+Conceptually, revIQ is a pricing/revenue-management layer, not the franchise itself and not the same thing as the
+property-management or reservation system. It uses hotel and market context to produce rate decisions or
+recommendations. Depending on the product configuration and supported interface, price decisions may be
+transmitted to connected reservation systems; the actual Travelodge property workflow must be verified.
+
+2.4 Target-state visual: what the client wants from Exora
+
+                    Figure 3. Target-state concept: preserve the existing franchise systems and add Exora's shared intelligence layer.
+
+2.5 Existing capability vs Exora responsibility
+
+Existing component Role today / public description  Exora approach
+
+                                                    EXORA | INTERNAL WORKING SPECIFICATION | PAGE 4
+EXORA HOSPITALITY INTELLIGENCE | PRODUCT & ENGINEERING
+
+Existing component Role today / public description                            Exora approach
+                                                                              Use client-authorized CSV exports first; investigate
+SynXis / Wyndham     Reservation/property data and distribution functions;    authorized API access after vendor/property onboarding.
+stack                SynXis Property Hub exposes reservation retrieval
+                     APIs in its developer documentation. [R3]                Use exported source records to build a cross-property data
+                                                                              view; do not assume the client has API access.
+ChoiceADVANTAGE      Choice describes it as a property/yield management
+                     system for room inventory, rates and reservations; its   Use as a benchmark to understand the workflow only.
+                     rate tool suggests rates based on past property          Build Exora from independently authorized source data
+                     performance and projected occupancy. [R2]                and licensed market data.
+
+Wyndham RevIQ        A Wyndham/IDeaS revenue-management capability.           Automate deterministic KPI calculations, exception rules,
+                     The 2025 La Quinta RevIQ supplement documents            and AI-supported narrative summaries.
+                     forecasts, pricing optimizations, events/seasons,        Preserve channel/source and channel cost where
+                     floors/ceilings and competitive sets for that franchise  available; do not assume all channels are directly
+                     context. [R1]                                            queryable.
+
+Daily/night reports  Staff and hotel systems produce reports; client says
+                     managers manually review them.
+
+Booking channels /   Reservations arrive through more than one channel.
+OTAs
+
+3. What is documented about the incumbent revenue tools
+
+  IMPORTANT DISTINCTION
+
+   Vendor documentation describes product functions, not the complete proprietary feature vector, weights, coefficients, or
+   optimization algorithm. Exora can adopt a compatible business-variable framework, but cannot claim to know or reproduce
+   the private internal logic of ChoiceADVANTAGE or RevIQ from public descriptions.
+
+3.1 ChoiceADVANTAGE -- publicly described baseline
+
+Choice Hotels' 2025 Form 10-K says ChoiceADVANTAGE includes a rate and selling management tool that helps
+franchisees manage rates and inventory to improve RevPAR by optimizing ADR and occupancy. It also describes
+a revenue-management feature that calculates suggested optimum rates based on each hotel's past performance
+and projected occupancy. [R2]
+
+ Documented at a high level: property room inventory, rates, reservations, historical property performance and projected
+     occupancy.
+
+ Not disclosed in the public filing: the complete model input list, forecast method, feature weights, price elasticity method,
+     competitor-rate feed details, exact update frequency or API schema for this property.
+
+3.2 Wyndham RevIQ -- publicly described functions
+
+A 2025 RevIQ supplement embedded in a La Quinta franchise disclosure document describes RevIQ Standard as
+providing a daily optimization for base-price decisions and last-room value for the next 365 days, four intra-day
+optimizations for the next 14 days, a daily 365-day occupancy forecast, non-base room-type pricing offsets, user-
+configured special events and pricing seasons, seasonal price floors and ceilings, smart alerts, reporting and user-
+configured competitive sets. The Premium tier adds up to three priced room classes and optimized hotel/room-type
+overbooking. [R1]
+
+Scope caveat: the source is a 2025 La Quinta franchise supplement, not the Travelodge owner's executed
+agreement. It is useful to understand published RevIQ features, but the client's own Travelodge agreement,
+configuration and RevIQ tier must be obtained before treating any term or feature as applicable.
+
+3.3 Baseline variable families Exora should support
+
+Variable family      Why include it in Exora baseline                              Public evidence status
+
+Historical property  The public Choice description explicitly references past      Choice explicitly; RevIQ functions imply
+performance          performance; RevIQ supports long-horizon forecasts and price  performance history but exact fields are
+                     optimization.                                                 not disclosed.
+
+                                                                              EXORA | INTERNAL WORKING SPECIFICATION | PAGE 5
+EXORA HOSPITALITY INTELLIGENCE | PRODUCT & ENGINEERING
+
+Variable family              Why include it in Exora baseline                                  Public evidence status
+Projected occupancy /        Fundamental to rate setting and inventory yield.
+demand                       Needed to understand how many rooms remain to sell.               Choice explicitly; RevIQ explicitly
+Room inventory / sellable                                                                      documents 365-day occupancy forecast.
+capacity                     Needed to set and compare a property's prices and room types.
+                             Demand varies by day, season and event.                           Choice explicitly manages inventory;
+Current/base rates and rate                                                                    RevIQ price/LRV and overbooking
+classes                      A selected competitor group provides market context.              functions depend on property inventory
+                             Prevent unreasonable or disallowed recommendations.               context.
+Seasonality and special
+events                                                                                         Rates are central to both tools; RevIQ
+                                                                                               explicitly documents base prices and
+Competitor set / competitor                                                                    room-type offsets/classes.
+rates
+                                                                                               RevIQ supplement explicitly documents
+Price floors / ceilings                                                                        user-configured seasons and special
+                                                                                               events; Choice's public filing does not
+                                                                                               describe its event inputs.
+
+                                                                                               RevIQ supplement explicitly documents
+                                                                                               configured competitive sets; not
+                                                                                               confirmed in Choice public description.
+
+                                                                                               RevIQ supplement explicitly documents
+                                                                                               configurable floors/ceilings; Choice public
+                                                                                               filing does not specify these controls.
+
+PROJECT DECISION
+
+Use the shared business foundation--historical property performance, projected occupancy/demand, room inventory and
+room rates--as the common baseline. Add the other documented RevIQ capabilities (events, seasons, comp set,
+floors/ceilings and room classes) where the client's data, configuration and permissions support them. Do not label every
+variable as "used by both systems" because Choice's public documentation does not reveal that level of detail.
+
+4. Target product scope and operating model
+
+4.1 Product modules
+
+Module                       Main job                                                MVP       Boundary
+                                                                                     priority
+Data ingestion &             Import CSVs and authorized APIs; normalize two          P0        No direct scraping or unauthorized
+normalization                franchise data formats.                                 P0        access.
+                                                                                     P0
+Pricing data foundation      Create property/date/room-class histories and daily     P0        Must be reliable before model
+                             booking snapshots.                                      P0        development.
+                                                                                     P1
+Pricing recommendation       Forecast demand, evaluate candidate prices, enforce     P1        Advisory only until approval and
+engine                       guardrails, explain recommendation.                     P2        write-back are proven.
+
+Pricing workbench            30-day calendar, recommendations, competitor context,             Manager remains in control.
+                             approve/edit/reject.
+                                                                                               Use proper holdouts/backtests; do
+Performance                  Compare forecasts/recommendations with actual                     not promise uplift.
+measurement                  outcomes and incumbents.
+                                                                                               Separate reporting module sharing
+Operations & financial       Daily/night report parsing, ADR/RevPAR, discrepancies,            same data layer.
+intelligence                 cancellation/no-show and ledger checks.
+                                                                                               LLM does not perform authoritative
+AI management assistant Natural-language questions and concise explanations                    arithmetic.
+                                       over validated metrics.
+                                                                                               Separate technical and contractual
+Automated rate publishing Push approved rates to PMS/CRS where permitted.                      approval gate.
+
+4.2 What Exora is not building
+
+ A replacement for SynXis, ChoiceADVANTAGE, franchise CRS, channel manager or guest booking engine.
+ A payment gateway, accounting system or general ledger replacement.
+
+                                                                                              EXORA | INTERNAL WORKING SPECIFICATION | PAGE 6
+EXORA HOSPITALITY INTELLIGENCE | PRODUCT & ENGINEERING
+
+ A black-box model that changes live rates without review during the pilot.
+ A reverse-engineered clone of RevIQ or ChoiceADVANTAGE.
+ A guest-personalized pricing system. Recommendations are based on property/date/room-class market and inventory
+
+     conditions, not an individual guest's protected or personal characteristics.
+
+5. Data strategy and variable catalogue
+
+The pricing engine is only as good as its historical and current data. The most important requirement is not simply
+a daily occupancy total. We need to reconstruct what the property knew about each future stay date at multiple
+points in time. This is what allows us to calculate booking pace and train forecasts without leaking future
+information into historical tests.
+
+5.1 Required data domains
+
+Domain                 Variables / fields                                            Purpose                                   Priority
+Property & capacity
+                       property_id, brand, address/geo, timezone, total rooms,       Separate the properties and understand    P0
+Reservations           sellable rooms, opening days, room classes, amenities,
+                       property positioning                                          capacity and product differences.
+Daily inventory
+snapshots              reservation ID, created_at, modified_at, arrival, departure,  Build booking history, lead time, LOS,    P0
+Rates & realized
+revenue                room nights, room class, status, channel/source, rate plan, cancellations and demand.
+Actual stay outcomes
+                       cancellation timestamp, no-show flag
+Competitive rates
+                       stay_date, room_class, snapshot timestamp, OTB rooms,         Reconstruct booking curves and remaining P0
+Seasonality & events   available rooms, out-of-order rooms, oversell/overbooking     sellable inventory.
+                       status
+Weather & disruptions
+Channel economics      public/current rate, booked rate, nightly rate, room revenue Measure ADR, net/gross revenue and         P0
+Pricing controls
+Manager feedback       ex-tax, tax, fees, discounts, currency, rate plan             price history.
+
+                       occupied rooms, checked-in/check-out, no-show,                Measure forecast outcomes and             P0
+
+                       cancellations, actual paid room nights, refunds/adjustments cancellation/no-show patterns.
+
+                       where available
+
+                       competitor ID, source/channel, stay date, room category,      Build normalized market reference and rate P1
+
+                       occupancy basis, refundable terms, meal/fees/tax treatment, index.
+
+                       price, availability, collected_at
+
+                       weekday, weekend, month, season, holiday, event               Represent demand context not captured by P1
+                       name/type, venue, distance, dates, estimated                  property history.
+                       attendance/impact, source confidence
+
+                       forecast/alert type, severity, temperature,                   Add relevant travel disruption or demand  P1
+                       snowfall/precipitation, wind, valid time, location/distance
+                                                                                     context.
+
+                       channel, commission %, payment/transaction costs if           Optimize net contribution rather than     P1
+                       provided, net room revenue, cancellation terms
+                                                                                     headline ADR alone.
+
+                       min/max rate, max step change, rate parity constraints,       Keep recommendations operationally and P0
+                       excluded dates, room-class relationships, approval policy     contractually valid.
+
+                       recommendation_id, recommended rate, approved rate,           Capture adoption, reasons and outcomes. P0
+                       override reason, approver, timestamp
+
+5.2 Common baseline variables (must be available)
+
+Variable               Definition                                         Initial source                  How engine uses it
+Historical ADR
+                       Average realized room revenue per occupied         Historical reservation/nightly  Baseline performance by
+Historical occupancy   room night, excluding taxes/fees under an          revenue CSV                     property, weekday, month, room
+                       agreed accounting convention.                                                      class and lead time.
+Projected occupancy /
+OTB occupancy          Occupied room nights divided by sellable room PMS/night audit and inventory        Demand pattern and forecast
+Sellable inventory                                                                                        target.
+                       nights.                                            snapshots
+Current/base rate
+                       Rooms already booked for a future stay date        Future reservations + inventory Current booking position before
+                       divided by sellable inventory.
+                                                                          export                          forecasted future pickup.
+
+                       Physical room count minus out-of-order rooms Inventory/housekeeping/mainte Capacity ceiling and remaining
+
+                       and other unavailable units.                       nance exports                   rooms to sell.
+
+                       Current public or approved base rate for           PMS rate export                 Anchor and comparison point for
+                       property/date/room class.                                                          recommendations.
+
+                                                                                     EXORA | INTERNAL WORKING SPECIFICATION | PAGE 7
+EXORA HOSPITALITY INTELLIGENCE | PRODUCT & ENGINEERING
+
+Variable                      Definition                          Initial source                               How engine uses it
+
+Historical property           ADR, occupancy, RevPAR, room revenue and PMS history / daily snapshots           Seasonality, baseline forecast
+performance                   pickup by comparable periods.                                                    and performance comparison.
+
+Room class / room-type        Room category and price difference relative to PMS room-type mapping             Separate recommendations by
+offset                        base class.                                                                      sellable room class where data
+                                                                                                               supports.
+Day-of-week and season Calendar features for the stay date.       Derived calendar / client-
+                                                                  configured seasons                           Capture recurring local patterns.
+
+5.3 Additional variables Exora should add
+
+Additional variable               Why it matters                                                                       MVP / later
+
+Booking lead time                 Days between booking creation and arrival; shows when demand is materializing.       P0
+
+Booking pickup / pace             Change in on-the-books rooms between saved snapshots for the same future stay date.  P0
+
+Length of stay (LOS)              One-night and multi-night demand can differ; some market feeds compare LOS.          P0
+
+Cancellation pickup / cancellation A gross reservation count can overstate expected occupied rooms.                    P0
+
+rate
+
+No-show rate                      Useful for realized demand and operational reporting; must be separated from cancellations. P1
+
+Channel mix                       Direct, brand.com, OTA, GDS, phone/walk-in shares can change net yield.              P1
+
+Commission-adjusted net rate      A $110 OTA booking may net less than a $105 direct booking.                          P1 when
+                                                                                                                       commission
+                                                                                                                       data exists
+
+Competitor availability and       A competitor rate without availability, room/terms equivalence can mislead.          P1
+
+matched terms
+
+Competitive rate index            Our rate divided by comparable comp-set median, with direction and freshness.        P1
+
+Event intensity and distance      Event size, venue distance, event dates and confidence improve context over a plain event P1
+                                  flag.
+
+Weather severity and forecast     Only severe/local weather should affect demand; avoid simplistic temperature pricing rules. P1
+confidence
+
+Amenities / room product attributes Explains why a room class can command a premium or discount.                       P1 after
+                                                                                                                       mapping
+
+Brand/property positioning        Separates Travelodge and Quality Suites positioning without assuming brand alone     P1
+
+                                  determines willingness to pay.
+
+Out-of-order / maintenance rooms Capacity should reflect rooms that cannot actually be sold.                           P0 if records
+                                                                                                                       exist
+
+Rate elasticity / price response  Estimates how booking probability changes as price changes.                          P2 after
+                                                                                                                       sufficient
+                                                                                                                       variation and
+                                                                                                                       careful
+                                                                                                                       validation
+
+Forecast uncertainty              Prevents aggressive recommendations when model confidence is low.                    P0
+
+Data freshness / source quality   A stale competitor rate or missing snapshot should lower confidence or block a       P0
+
+                                  recommendation.
+
+5.4 Snapshot requirement -- non-negotiable
+
+  WHY SNAPSHOTS MATTER
+
+   A current reservations export tells us what is booked now. It does not tell us what was booked 30, 14 or 7 days before
+   arrival. Without dated snapshots, we cannot reconstruct historical booking pace accurately. Start saving a daily snapshot of
+   future occupancy, room rates and inventory for each property, stay date and room class from the first pilot day.
+
+ Minimum daily snapshot horizon: next 60 days (30-day horizon is enough for the first demo, but 60 days gives more lead-
+     time context).
+
+                                                                                              EXORA | INTERNAL WORKING SPECIFICATION | PAGE 8
+EXORA HOSPITALITY INTELLIGENCE | PRODUCT & ENGINEERING
+
+ Retain raw reservation changes and snapshot timestamps; never overwrite prior snapshots with the latest totals.
+ Capture whether each value is on-the-books, forecast, actual, or manually supplied. These must not be mixed.
+
+6. Metrics and definitions
+
+Before building a recommendation model, the client and Exora must agree on the accounting definitions. The
+same metric can differ between systems when taxes, fees, complimentary rooms, out-of-order rooms or room
+revenue are treated differently.
+
+Metric             Formula / definition                                Implementation note
+Sellable rooms
+Occupancy %        Physical room inventory - out-of-order/unavailable  Use by stay date and room class where possible.
+ADR                rooms
+RevPAR
+OTB occupancy      Occupied room nights ÷ sellable room nights × 100   Specify whether based on actual stays or on-the-books
+Pickup                                                                 future reservations.
+Cancellation rate
+No-show rate       Room revenue excluding tax ÷ occupied paid room     Agree how complimentary rooms, discounts and refunds
+Booking lead time  nights                                              are treated.
+Length of stay
+Comp-set index     Room revenue excluding tax ÷ available sellable room Equivalent to ADR × occupancy when definitions align.
+Net ADR            nights
+
+                   Confirmed on-the-books room nights ÷ sellable room  Future bookings currently held; not the final forecast.
+                   nights
+
+                   OTB room nights at current snapshot - OTB room      Compute over 1/7/14-day windows and by days-to-
+                   nights at prior snapshot                            arrival.
+
+                   Cancelled room nights ÷ total booked room nights in a Use a clear cohort definition and include cancellation
+
+                   defined cohort                                      timing.
+
+                   No-show room nights ÷ eligible arrival room nights  Keep separate from cancellation rate.
+
+                   Arrival date - booking creation date                Can analyze median/quantiles by property and stay
+                                                                       date.
+
+                   Departure date - arrival date                       Expand multi-night reservations to nightly records.
+
+                   Property rate ÷ comparable competitor median × 100  Only compute on matched dates, room/occupancy
+                                                                       basis, taxes and refund terms.
+
+                   Net room revenue after known distribution/transaction Only calculate when channel cost data is reliable.
+                   costs ÷ occupied paid room nights
+
+7. Pricing recommendation methodology
+
+7.1 Design principle
+
+Do not ask an LLM to "guess the best rate." Build a deterministic and statistical pricing service that calculates
+demand, evaluates price scenarios and returns a constrained recommendation. Use AI afterward to explain the
+evidence in plain language.
+
+7.2 Decision unit
+
+The target decision key is: property × stay_date × room_class × rate_plan/condition (only where needed). For the
+first MVP, start at property × stay_date × base room class; add additional priced room classes once the source
+mapping and volume justify it.
+
+7.3 Model pipeline
+
+1. Create a clean daily panel for every property, stay date and room class, including capacity, OTB, actuals, current price and
+     source freshness.
+
+2. Build comparison features: same weekday, same season, same lead-time bucket, prior-year or comparable historical
+     dates, booking pickup and cancellation pattern.
+
+3. Forecast expected final demand/occupancy before pricing. Include uncertainty intervals and baseline benchmarks.
+
+                                                                       EXORA | INTERNAL WORKING SPECIFICATION | PAGE 9
+EXORA HOSPITALITY INTELLIGENCE | PRODUCT & ENGINEERING
+
+4. Establish market context using normalized competitor rates and availability, plus event/weather indicators where data
+     quality is sufficient.
+
+5. Estimate how expected bookings respond to candidate prices. Do not assume the competitor median is the optimal price or
+     that higher occupancy always means a price increase.
+
+6. Optimize the candidate rate against expected net room revenue subject to property-specific price, inventory, rate-change
+     and franchise constraints.
+
+7. Create explanation codes, confidence, data-quality warnings and a transparent comparison to current/previous rate.
+8. Require manager approval in the pilot; record all edits, rejections and override reasons.
+9. Measure actual pickup, occupancy, ADR, RevPAR, net room revenue and forecast error after the stay date.
+
+7.4 Recommended technical progression
+
+Stage              Method                                               What it is good for                          Do not claim
+
+Stage 0: baseline  Comparable-date benchmarks + explicit                Fast demo, auditability, data-gap discovery  Do not call it machine
+                   rule/guardrail engine                                                                             learning or claim optimized
+                                                                                                                     revenue.
+
+Stage 1: forecasting Seasonal-naive baseline, regression/gradient-      Forecast demand/occupancy where history      Do not train separate
+                               boosted models, pooled property effects  is sufficient                                complex models on tiny
+                                                                                                                     property datasets.
+
+Stage 2: price     Estimate demand response to price using              Understand likely demand at alternative      Do not infer causality from
+response           historical variation, controls and carefully         rates                                        raw correlation alone.
+                   designed experiments
+
+Stage 3:           Candidate price search over expected occupied        Produce a feasible rate recommendation       Do not maximize ADR alone
+constrained        rooms × net rate, with business constraints                                                       or ignore channel cost and
+optimization                                                                                                         inventory.
+
+Stage 4: controlled Approved rate-publishing adapter + monitoring + Reduce manual rate entry once                    Do not enable autonomous
+                                                                                                                     write-back before certification
+automation         rollback                                             integrations are authorized                  and manager sign-off.
+
+7.5 Objective function (conceptual)
+
+  OPTIMIZATION TARGET
+
+   For each stay date and room class, evaluate feasible candidate rate r and estimate expected sellable rooms Q(r). A simple
+   objective is expected net room revenue = r × Q(r) × (1 - effective channel cost), with taxes/fees excluded from room
+   revenue. Add operational constraints and, where data allows, incremental variable costs. This is a conceptual formulation;
+   actual objective and cost treatment must be approved by the owner.
+
+The engine must account for the fact that remaining rooms are finite. If occupancy is forecast to exceed capacity,
+additional demand cannot create more room nights; the objective becomes selecting the best rate/mix under
+capacity and overbooking rules. Overbooking should not be included in the first release unless the client explicitly
+asks for it and the source data supports cancellations/no-shows accurately.
+
+7.6 Confidence and fallback policy
+
+Condition                                             Engine behaviour
+
+All critical PMS inputs fresh; snapshots consistent;  Generate normal recommendation with confidence band.
+enough history
+
+Competitor feed stale or unavailable                  Use internal-data model; label market context missing; lower confidence.
+
+Missing inventory or out-of-order data                Block or clearly mark recommendation as non-publishable.
+
+Insufficient historical data for the room class       Use property-level / pooled baseline and conservative guardrails; do not pretend
+                                                      room-class model is trained.
+
+Extreme event or severe weather with no comparable Show event/alert as context; do not apply an arbitrary large price multiplier.
+history
+
+Model drift / high forecast error                     Fall back to approved baseline rules and notify revenue manager.
+
+                                                                        EXORA | INTERNAL WORKING SPECIFICATION | PAGE 10
+EXORA HOSPITALITY INTELLIGENCE | PRODUCT & ENGINEERING
+
+8. System architecture and flows
+
+8.1 Target architecture
+
+  Figure 4. Proposed Exora technical architecture. *Existing revenue recommendations may be compared only where the client and franchise
+                                               contract permit; they are not assumed to be a model-training data source.
+
+                                                                                            EXORA | INTERNAL WORKING SPECIFICATION | PAGE 11
+EXORA HOSPITALITY INTELLIGENCE | PRODUCT & ENGINEERING
+
+8.2 Pricing recommendation workflow
+
+   Figure 5. Daily price-decision workflow with validation gates, human approval and post-stay feedback. Invalid or stale data should hold the
+                                                      recommendation rather than silently fall back to an unsafe rate.
+
+                                                                                            EXORA | INTERNAL WORKING SPECIFICATION | PAGE 12
+EXORA HOSPITALITY INTELLIGENCE | PRODUCT & ENGINEERING
+
+8.3 Logical data model
+
+       Figure 6. Minimum core entities and their relationships. This is a conceptual model; physical schema is refined after CSV inspection.
+
+8.4 Suggested service boundaries
+
+Service                 Responsibility                                             Suggested implementation
+Web dashboard
+Application API         Property overview, calendar, recommendation details,       Next.js / React / TypeScript
+Data ingestion workers  approvals, analytics, report viewer
+Pricing service
+Database                Auth, properties, ingestion runs, recommendation queries,  Fastify or NestJS / TypeScript
+Object storage          approval workflow
+Scheduler / queue
+Observability           Parse CSV/XLSX, normalize source records, deduplicate,     Python or TypeScript worker; versioned mapping
+                        validate, load                                             profiles
+
+                        Feature engineering, demand forecast, candidate-rate       Python service (FastAPI) for DS libraries; batch
+                        evaluation, optimizer, explanations metadata               jobs first
+
+                        Transactional domain data, snapshots, model runs, approvals PostgreSQL; partition high-volume snapshots if
+
+                        and audit history                                          needed
+
+                        Original reports/exports, immutable ingestion artifacts, model S3-compatible object storage with encryption
+                        artifacts
+
+                        Scheduled imports, daily snapshots, model runs, alerts     BullMQ/Redis or managed scheduler/queue
+
+                        Logs, job status, data freshness, model metrics and alerting Structured logs + metrics + error tracking
+
+This is a recommended implementation shape, not a mandatory stack commitment. The pricing engine should be
+isolated from the UI and franchise adapters so the team can replace market-data providers or add properties
+without rewriting the model.
+
+9. Data model and ingestion contracts
+
+9.1 Canonical entities
+
+Entity                  Key fields                                                                    Notes
+property
+room_class              property_id, franchise, brand, name, timezone, currency, address, room_count Use stable internal IDs; never rely on
+reservation                                                                                                                            names as keys.
+
+                        room_class_id, property_id, source_room_type_code, canonical_class,           Maintain source-to-canonical mapping
+                        capacity, base_offset                                                         and effective dates.
+
+                        reservation_id, source_system, property_id, created_at, updated_at, arrival,  Store source IDs and normalized status
+                        departure, status, channel                                                    mapping.
+
+                                                                                EXORA | INTERNAL WORKING SPECIFICATION | PAGE 13
+EXORA HOSPITALITY INTELLIGENCE | PRODUCT & ENGINEERING
+
+Entity                       Key fields                                                                     Notes
+
+reservation_night            reservation_id, stay_date, room_class_id, rate, room_revenue, tax, fees,       One row per reservation-night for
+                             currency                                                                       analysis.
+
+inventory_snapshot           property_id, stay_date, room_class_id, captured_at, physical, OTB, available,  Append snapshots; do not overwrite.
+                             out_of_order
+
+rate_snapshot                property_id, stay_date, room_class_id, captured_at, base_rate, selling_rate,   Preserve effective date and collected
+                             rate_plan                                                                      timestamp.
+
+competitor_rate_observatio competitor_id, property_id, stay_date, room_class, source, price, terms,         Store comparable terms, not price alone.
+
+n                            available, collected_at
+
+demand_context               event/weather/holiday_id, location, valid_from, valid_to, type, severity, source, Source and confidence required.
+                             confidence
+
+pricing_constraint           property_id, room_class_id, effective_from/to, min_rate, max_rate, max_step,   Audit every change to constraints.
+                             excluded_dates
+
+forecast_run                 run_id, model_version, created_at, data_cutoff_at, horizon, metrics            Every result must be reproducible.
+
+recommendation               recommendation_id, run_id, property/date/room_class, current_rate,             Immutable output for audit.
+                             suggested_rate, confidence, reason_codes
+
+recommendation_action        recommendation_id, action, approved_rate, actor, timestamp, reason             Record approved, edited, rejected and
+                                                                                                            published decisions.
+
+actual_outcome               property/date/room_class, realized_occupancy, ADR, RevPAR, room_revenue, Used for evaluation and monitoring.
+                             no_shows, cancellations
+
+9.2 CSV-first integration plan
+
+The client has confirmed CSV export availability. Therefore, the MVP should begin with controlled CSV imports
+rather than delaying the pilot for vendor API access. Each property gets its own mapping profile because the two
+franchise systems will not necessarily use the same column names, status codes, date formats or room-type
+codes.
+
+Export requested             Minimum fields                                                                                    Frequency
+Future reservations / on-    Reservation ID (pseudonymous), created/updated timestamp, arrival, departure, room type,
+books                        status, nightly rate, channel/rate plan                                                           Daily; ideally delta
+                                                                                                                               updates more
+Historical reservations      Same fields plus actual nightly revenue, cancellation/no-show status and tax/fee breakdown        frequently
+
+Daily inventory / occupancy Stay date, room type, physical/sellable inventory, OTB rooms, available rooms, out-of-order        One-time initial load
+                                          rooms                                                                                plus incremental daily
+                                                                                                                               load
+Current rates / future rate  Stay date, room type, current/base rate, rate plan, restrictions, source channel where available
+calendar                                                                                                                       Daily snapshot;
+                             Room revenue ex tax, taxes, fees, payments/tenders, refunds/adjustments, ledger totals            preserve capture
+Night audit / revenue                                                                                                          timestamp
+summary                      Room classes, capacity, amenities, brand standards, min/max pricing rules
+                                                                                                                               Daily and after major
+Room/property                Competitor, stay date, price, currency, room category, availability, cancellation/refund terms,   rate change
+configuration                taxes/fees, timestamp
+                                                                                                                               Daily
+Competitive set / RateGain
+sample                                                                                                                         On change
+
+                                                                                                                               Daily or agreed
+                                                                                                                               licensed schedule
+
+9.3 API integration options
+
+ SynXis: Sabre's public SynXis Property Hub Reservation API documentation shows reservation retrieval and reservation
+     detail fields including stay dates, room types, nightly amounts, taxes and fees. It requires authentication and
+     property/vendor identifiers. This does not prove this client has API access; confirm vendor onboarding and franchise
+     authorization. [R3]
+
+ ChoiceADVANTAGE: the client has confirmed CSV availability. No direct Choice API access is assumed in this
+     specification; request written API/export guidance from Choice or the property's authorized provider.
+
+                                                        EXORA | INTERNAL WORKING SPECIFICATION | PAGE 14
+EXORA HOSPITALITY INTELLIGENCE | PRODUCT & ENGINEERING
+
+ RateGain: its RMS partner page describes REST APIs for hotel search, shopping schedule configuration, rate-change
+     updates to an RMS and historical rate evolution. Commercial terms, eligibility, property coverage and right to embed data
+     must be agreed. [R4]
+
+9.4 Data quality and reconciliation rules
+
+ Every import must record property, source, upload time, business date, file hash, schema version, row counts and
+     validation result.
+
+ Deduplicate reservation updates using source reservation ID plus last-modified timestamp; preserve change history.
+ Normalize all stay dates in the property timezone (America/Chicago for Fargo), while storing UTC timestamps for ingestion
+
+     and events.
+ Validate date ranges, currency, non-negative room counts, valid rate ranges, status values and room-class mapping.
+ Reconcile nightly room revenue, tax, fees and payment totals with the source reports. Differences must be visible, not
+
+     silently corrected.
+ Keep raw CSVs and normalized records separately so mapping defects can be corrected and reprocessed.
+ Flag missing snapshot dates; never backfill booking pace with guessed historical on-books counts.
+
+10. Dashboard, reporting and AI experience
+
+10.1 Pricing workbench
+
+Screen                 Required content
+Portfolio overview
+Pricing calendar       Both properties; current occupancy; future OTB; ADR; RevPAR; revenue; data freshness; high -priority alerts.
+
+Recommendation detail  Rows for stay dates and room classes; current rate; Exora recommendation; rate difference; OTB occupancy;
+                       forecast occupancy; comp-set index; confidence; approval status.
+Competitive set
+Approvals              Top drivers; demand forecast; competitor sample; data source timestamps; floors/ceilings; candidate-rate
+Performance            scenario comparison; reason codes.
+
+                       Competitor selection, room/terms matching, current and historical rates, availability and collection time.
+
+                       Approve, edit or reject; mandatory reason for material override; user/timestamp; export approved rate sheet.
+
+                       Forecast vs actual occupancy; ADR/RevPAR; revenue; pickup; recommendations accepted; overrides; model
+                       error.
+
+10.2 Operations and financial intelligence module
+
+ Daily briefing: previous-day performance, key variances, missing reports, significant incidents and action items.
+ Financial checks: compare room revenue, taxes, payments/tenders, refunds and ledger totals using deterministic
+
+     reconciliation rules.
+ Revenue metrics: ADR, RevPAR, occupancy, room revenue excluding tax, revenue trends and channel mix.
+ Reservation monitoring: cancellations, no-shows, booking pace changes and unusual patterns.
+ Operations signals: rooms out of order, maintenance delays, unclosed shift issues and staff-note classification where
+
+     reports contain those fields.
+
+10.3 AI assistant boundaries
+
+Use LLM for                                                     Do not use LLM for
+
+Summarize staff notes and daily reports; classify incident      Authoritative arithmetic; ledger reconciliation; deciding final prices;
+narratives; explain metrics; answer natural-language questions  directly changing PMS rates; inventing missing data; claiming
+over curated aggregates; draft management briefings.            cause from correlation; reading raw guest PII unnecessarily.
+
+11. Security, governance and contractual controls
+
+  CRITICAL REVQI CONTRACT CHECK
+
+   The 2025 La Quinta RevIQ supplement includes restrictions on sharing RevIQ outputs with third parties, using RevIQ to
+   process third-party data or as a service provider, and using the system to develop a commercial offering directly or
+
+                                                                EXORA | INTERNAL WORKING SPECIFICATION | PAGE 15
+EXORA HOSPITALITY INTELLIGENCE | PRODUCT & ENGINEERING
+
+   indirectly competing with IDeaS. This is not confirmed to be the Travelodge client's executed contract, and it is not a legal
+   opinion. Obtain and review the actual Travelodge franchise/technology agreement before Exora receives, stores, exports,
+   benchmarks, shares or trains on any RevIQ output. Build independently from authorized PMS/source data and
+   licensed/public data unless written permission clearly allows more. [R1]
+
+11.1 Access and privacy
+
+ Use property-level service accounts and role-based access; separate Travelodge and Quality Suites data by
+     tenant/property permissions.
+
+ Collect the minimum data needed for revenue analytics. Prefer pseudonymous reservation IDs; exclude guest names,
+     email, phone, payment-card data and identity documents from the pricing dataset.
+
+ Never ingest payment card numbers or security codes. Financial reporting should use totals, tender types and transaction
+     references where approved, not cardholder data.
+
+ Encrypt data in transit and at rest; store credentials/secrets in a secret manager; rotate API keys and maintain an access
+     audit log.
+
+ Apply retention and deletion schedules to raw reports, reservation records and external market data consistent with client
+     contracts and vendor licensing.
+
+ Use a data-processing agreement covering data ownership, purposes, sub-processors, retention, breach notice and
+     derived data/model rights.
+
+11.2 Pricing governance
+
+ Each property maintains its own floor, ceiling, room-class relationships, blocked dates, rate-change limits and authorized
+     approvers.
+
+ The recommendation record stores model version, feature/data cutoff, inputs summary, constraints applied and reason
+     codes.
+
+ Manager approval is required for every live rate change in the pilot. No autonomous write-back until the owner,
+     franchise/vendor and Exora security reviews approve it.
+
+ Provide rollback to the last approved rate and an exportable audit history.
+ Avoid personalized pricing based on individual guest characteristics. Keep the decision at property/date/room-class level.
+
+12. Testing, backtesting and success measures
+
+12.1 Data acceptance checks
+
+Check                     Proposed acceptance criterion
+Reservation coverage      All provided source rows either load or appear in an exception report; no silent drops.
+Deduplication             Repeated import of same file produces no duplicate reservation-night rows.
+Financial reconciliation  Room revenue/tax/fee totals reconcile to agreed source reports within documented tolerance; all
+                          differences are explained.
+Inventory consistency     OTB + available + out-of-order reconciles to physical inventory under the client's definitions.
+Snapshot continuity       Daily snapshots retained for the chosen future horizon; missing days visible.
+Mapping traceability      Every canonical field maps to source file/column and transformation version.
+
+12.2 Forecast/model evaluation
+
+ Use rolling-origin backtesting: train only on information available at each historical cutoff and forecast future stay dates.
+ Compare forecasts with simple baselines (same weekday/season historical average, seasonal-naive and current on-books
+
+     trajectory).
+ Track occupancy forecast MAE/WAPE or another agreed error metric by property and horizon; do not report one aggregate
+
+     score without property/horizon breakdown.
+ Evaluate recommendation outcomes by accepted vs rejected vs edited, but do not interpret acceptance as proof of uplift.
+ Price optimization needs a credible estimate of demand response to price. Use controlled, manager-approved tests or
+
+     defensible quasi-experimental methods; do not infer elasticity from correlation alone.
+
+                             EXORA | INTERNAL WORKING SPECIFICATION | PAGE 16
+EXORA HOSPITALITY INTELLIGENCE | PRODUCT & ENGINEERING
+
+12.3 Business KPIs                      Purpose
+                                        Average realized room price excluding tax, with agreed definition.
+        KPI                             Utilization of sellable inventory.
+       ADR                              Revenue per available sellable room; core revenue-yield metric.
+       Occupancy                        Revenue after known channel/distribution costs where available.
+       RevPAR                           Whether demand/occupancy estimates are reliable enough for pricing decisions.
+       Net room revenue                 Share approved, edited and rejected; capture reasons.
+       Forecast accuracy                Time from recommendation to manager decision / publication.
+       Recommendation adoption          Manager time spent preparing/reviewing reports before vs after deployment.
+       Rate-change turnaround           Time to investigate and resolve discrepancies/operational alerts.
+       Manual reporting time
+       Exception resolution time
+
+NO PREMATURE ROI CLAIMS
+
+Do not promise a fixed revenue uplift before historical backtesting and a controlled pilot. Report measured results with the
+observation period, comparator and limitations. The initial pilot proves data quality, forecast usefulness and manager
+adoption--not guaranteed incremental revenue.
+
+13. Implementation roadmap and acceptance criteria
+
+Phase                             Work                                                                        Exit gate / deliverable
+
+0. Discovery & permissions        Collect executed agreement excerpts, CSV samples, room                      Signed-off data dictionary, source inventory,
+                                  configuration, current workflows, rate guardrails, revIQ/Choice usage       legal/access checklist and agreed KPI
+                                  details and vendor access permissions.                                      definitions.
+
+1. Data foundation                Build CSV mapping profiles; raw archive; normalization; canonical           Both properties load repeatably; core
+                                  reservation-night, inventory and rate snapshots; data-quality reports.      metrics reconcile; snapshot process running
+                                                                                                              daily.
+
+2. Baseline pricing prototype Implement comparable-date baseline and transparent rules; 30-day                Manager can review recommendations
+                                           rate calendar; floors/ceilings; manager explanations.              based on actual property data; no live
+                                                                                                              publishing.
+
+3. Forecasting & market           Add rolling forecasts, booking pace, competitor-rate feed/sample,           Backtest vs baselines; validate competitive-
+context                           event/weather signals, confidence scoring.                                  set comparability and provider economics.
+
+4. Pricing workbench &            Build recommendation detail, approve/edit/reject, audit history, exports, Manager workflow accepted; every decision
+approvals
+                                  property-separated permissions.                                             traceable.
+
+5. Pilot & calibration            Run shadow mode, compare recommendations with existing decisions Documented pilot report, error metrics,
+
+                                  and realized outcomes; adjust guardrails.                                   usability sign-off and go/no-go decision.
+
+6. Optional write-back &          Obtain approvals, implement authorized PMS/CRS rate publishing,             Vendor certification and signed customer
+expansion                         rollback and expand additional properties.                                  approval; production monitoring and rollback
+                                                                                                              tested.
+
+7. Operations intelligence        Add night-report ingestion, financial reconciliation, anomaly rules, daily  Reports correctly parsed and reconciled; AI
+                                  briefings and AI assistant.                                                 narrative always references validated
+                                                                                                              metrics/source.
+
+13.1 MVP acceptance criteria
+
+ Both properties can be represented separately with their franchise, source-system and room-class mappings.
+ Authorized CSV exports can be imported repeatedly with idempotent processing and an audit record.
+ The system creates daily future stay-date snapshots and computes OTB occupancy and pickup.
+ The dashboard shows a 30-day rate calendar with current rate, suggested rate, projected occupancy, source freshness,
+
+     confidence and explanation.
+ Each suggestion respects property-specific floors, ceilings and maximum rate-change limits.
+
+                                                                             EXORA | INTERNAL WORKING SPECIFICATION | PAGE 17
+EXORA HOSPITALITY INTELLIGENCE | PRODUCT & ENGINEERING
+
+ Competitor comparisons are only made when stay date, room class, availability and booking terms are sufficiently
+     matched; otherwise they are marked non-comparable.
+
+ Managers can approve, edit or reject each suggestion; all actions and override reasons are stored.
+ No rate is written to a live property system during the MVP without explicit authorization and approval.
+ Backtesting uses time-correct historical cutoffs and reports metrics against a documented baseline.
+ All calculations can be traced to source records and metric definitions.
+
+14. Risks, assumptions and discovery checklist
+
+Risk / open item                Why it matters                                    Mitigation / action
+
+Exact franchise system modules  "SynXis" may refer to a specific                  Confirm exact product/version and authorized exports for
+unknown                         PMS/CRS/property hub configuration; different     Travelodge.
+                                APIs and data rights apply.
+                                                                                  Inspect actual sample CSVs; ask Choice/provider for export and
+ChoiceADVANTAGE data            Public description is high-level; property-level  API catalogue.
+granularity unknown             fields may not expose all model inputs.
+                                                                                  Ask manager for current screenshots and subscription/tier; do
+RevIQ product tier/configuration Standard vs Premium and property-specific        not access restricted output until contract review.
+
+unknown                         features affect comparison.                       Start daily snapshots immediately; obtain historical dated
+                                                                                  exports if available.
+Historical snapshots absent     Current bookings do not reconstruct old
+                                booking pace.                                     Pool data carefully with property effects; use simple baselines;
+                                                                                  validate model stability.
+Small data volume               Two properties and ~120 rooms may be
+                                insufficient for a highly complex model.          Request a Fargo sample, commercial quote, usage rights and
+                                                                                  embedded/OEM terms before purchase.
+RateGain price / coverage       External data may cost more than the value for
+unknown                         two properties or miss local competitors.         Normalize, store source metadata and suppress weak matches.
+
+Competitor price comparability  Different room classes, refund terms, fees, tax   Legal review of the client's signed agreements and written third-
+                                and availability create false comparisons.        party authorization.
+
+Contract / use restrictions     RevIQ terms may restrict sharing outputs and      Manual approval first; separate certification, rate limits and
+                                competitive use; property system terms may        rollback.
+                                restrict integrations.
+                                                                                  Agree calculation standards and reconcile before modelling.
+Automated price publishing      Wrong price can affect many bookings and
+                                franchise operations.
+
+Revenue definitions mismatch    ADR/RevPAR/tax/fees can differ across
+                                systems.
+
+14.1 Client discovery checklist
+
+ Confirm exact property legal/operator names, brand names, street addresses, room counts and room classes for both
+     motels.
+
+ Confirm whether RevIQ is used for Travelodge only or for both properties; obtain tier/configuration and the actual
+     Travelodge contract terms.
+
+ Confirm whether Quality Suites actively uses the built-in choiceADVANTAGE rate/selling management tool and whether
+     any separate RMS is used.
+
+ Obtain anonymized sample exports: future reservations, historical reservations, current/future rate calendar, daily
+     occupancy/inventory and night audit/ledger summaries for each property.
+
+ Confirm 12­24 months of history availability, daily snapshot history, cancellation/no-show fields, booking timestamps and
+     room-level/class-level detail.
+
+ Obtain the current competitive set and ask how they decide which nearby motels are comparable.
+ Confirm rate floor/ceiling, max daily rate change, franchise promotion/parity rules, who can approve and whether the client
+
+     expects auto-publishing.
+ Ask which reports the manager reads daily and define the exact calculations for ADR, revenue excluding tax, cash flow and
+
+     ledger discrepancies.
+ Obtain RateGain API sample, Fargo coverage report, commercial quote, rate limits, licensing, retention and white-
+
+     label/embedded rights.
+ Agree pilot success measures, pilot period, budget owner, monthly willingness-to-pay after demo and sign-off authority.
+
+15. References and source notes
+
+The following public sources informed the documented product capabilities and integration options. Accessed 04
+November 2026. These sources do not replace the client's executed franchise, technology or vendor agreements.
+
+                                                                                  EXORA | INTERNAL WORKING SPECIFICATION | PAGE 18
+EXORA HOSPITALITY INTELLIGENCE | PRODUCT & ENGINEERING
+[R1] 2025 La Quinta Franchise Disclosure Document -- RevIQ Standard/Premium supplement (Q1 2025; feature description
+
+and use restrictions). https://pub-
+22da695f2b6542a48e234bc59bc67d23.r2.dev/fdds/2025/LA_QUINTA_FRANCHISING_LLC_cmfed9a2002rf1vbtlvcf87l3
+.pdf Applies to La Quinta source document; not confirmed as the Travelodge agreement. See the RevIQ supplement and system-use
+
+restrictions.
+[R2] Choice Hotels International, Inc. 2025 Form 10-K (filed 2026).
+
+https://www.sec.gov/Archives/edgar/data/1046311/000104631126000008/chh-20251231.htm Describes choiceADVANTAGE
+
+room inventory/rates/reservations and revenue-management suggestions based on past performance and projected occupancy.
+[R3] Sabre SynXis Property Hub -- Reservation API documentation.
+
+https://developer.synxis.com/pms/property_hub/reservation Shows reservation retrieval and related reservation/room operations;
+
+authenticated access and appropriate property/vendor identifiers are required.
+
+[R4] RateGain -- Solutions for RMS Companies / Rate Intelligence APIs. https://rategain.com/solutions-for-rms-companies/
+
+Describes REST-based RMS integration, rate shopping schedules, historical rate evolution and rate-change feeds. Commercial terms still need
+validation.
+
+[R5] National Weather Service -- API documentation. https://www.weather.gov/documentation/services-web-API Public API
+
+for forecasts, alerts and observations; published as open data subject to reasonable usage limits.
+
+[R6] Ticketmaster Developer Portal -- Discovery API. https://developer.ticketmaster.com/products-and-
+docs/apis/discovery-manual/v2/ Event search API; coverage is not a complete calendar of every local Fargo event.
+
+[R7] Choice Hotels 2023 Form 10-K (historical disclosure).
+
+https://s201.q4cdn.com/538915302/files/doc_financials/2023/ar/chh-choice-hotels-international-inc-10-k-2023.pdf Earlier
+
+description of choiceADVANTAGE's proprietary rate-suggestion feature; the 2025 Form 10-K is preferred for current description.
+
+15.1 Evidence labels used in this specification
+
+ Client-reported: stated in the WhatsApp conversation or prior discovery notes (for example, CSV exports are available and
+     managers review daily/night reports).
+
+ Publicly documented: stated in a linked vendor filing, official API reference or official product page.
+ Proposed / inferred: Exora design recommendation, not a claim about an incumbent vendor's internal implementation.
+ To confirm: requires a client export, contract, vendor response or technical test before implementation.
+
+  FINAL BUILD RECOMMENDATION
+
+   Start with a CSV-first, independently sourced data foundation. Implement a transparent 30-day recommendation calendar
+   with a common historical-performance / projected-occupancy baseline, then add room-class, season/event, competitor,
+   booking-pace, channel-cost and weather features as data quality and commercial rights permit. Keep the engine advisory
+   until a backtested pilot is accepted and all live rate-publishing permissions are documented.
+
+                                                                                            EXORA | INTERNAL WORKING SPECIFICATION | PAGE 19
+
