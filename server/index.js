@@ -98,6 +98,118 @@ const categoryColumns=db.prepare('PRAGMA table_info(room_categories)').all().map
 if(!categoryColumns.includes('image_url'))db.exec("ALTER TABLE room_categories ADD COLUMN image_url TEXT NOT NULL DEFAULT ''");
 if(!categoryColumns.includes('image_source'))db.exec("ALTER TABLE room_categories ADD COLUMN image_source TEXT NOT NULL DEFAULT ''");
 
+const recommendationFactorInputs = [
+  ['historical.adr', 'number'], ['historical.occupancy', 'number'], ['historical.revpar', 'number'], ['historical.roomRevenue', 'number'], ['historical.pickupRooms', 'number'], ['historical.comparablePeriod', 'text'],
+  ['demand.onBooksRooms', 'number'], ['demand.occupancy', 'number'], ['demand.forecastOccupancy', 'number'], ['demand.forecastRooms', 'number'], ['demand.remainingRooms', 'number'], ['demand.sellableRooms', 'number'], ['demand.snapshotType', 'text'],
+  ['pace.pickupRooms', 'number'], ['pace.priorSnapshotOccupancy', 'number'], ['pace.leadTimeDays', 'number'], ['pace.lengthOfStayNights', 'number'], ['pace.cancellationPickupRooms', 'number'], ['pace.daysSincePriorSnapshot', 'number'],
+  ['cancellations.cancellationRate', 'number'], ['cancellations.noShowRate', 'number'],
+  ['market.competitorRate', 'number'], ['market.availability', 'text'], ['market.matchedTerms', 'text'], ['market.sampleHotels', 'number'], ['market.freshnessMinutes', 'number'],
+  ['calendar.dayOfWeek', 'text'], ['calendar.season', 'text'], ['calendar.specialEvent', 'text'], ['calendar.eventIntensity', 'number'], ['calendar.eventDistanceMiles', 'number'], ['calendar.eventConfidence', 'number'],
+  ['weather.severity', 'text'], ['weather.confidence', 'number'],
+  ['channels.mix.direct', 'number'], ['channels.mix.brand', 'number'], ['channels.mix.ota', 'number'], ['channels.mix.other', 'number'], ['channels.commissionEstimatePct', 'number'],
+  ['property.positioning', 'text'], ['property.roomClass', 'text'], ['property.ratePlan', 'text'], ['property.roomClassOffset', 'number'], ['property.amenityOffset', 'number'], ['property.amenities', 'text'], ['property.amenitiesMapped', 'boolean'],
+  ['capacity.physicalRooms', 'number'], ['capacity.outOfOrderRooms', 'number'], ['capacity.sellableRooms', 'number'], ['capacity.openDays', 'number'], ['capacity.openForSale', 'boolean'],
+  ['guardrails.floor', 'number'], ['guardrails.ceiling', 'number'], ['guardrails.maxRateChange', 'number'], ['guardrails.rateParityConstraint', 'text'], ['guardrails.parityFloorRate', 'number'], ['guardrails.excludedDates', 'boolean'], ['guardrails.approvalPolicy', 'text'],
+  ['uncertainty.confidence', 'number'], ['uncertainty.forecastUncertaintyPct', 'number'], ['uncertainty.bandLow', 'number'], ['uncertainty.bandHigh', 'number'], ['uncertainty.sourceQuality', 'text'], ['uncertainty.dataFreshnessMinutes', 'number'],
+  ['priceResponse.elasticity', 'number'], ['decision.currentRate', 'number'],
+];
+
+function readPath(value, path) { return path.split('.').reduce((node, key) => node && node[key], value); }
+function writePath(target, path, value) { const keys = path.split('.'); let node = target; for (const key of keys.slice(0, -1)) node = node[key] ||= {}; node[keys.at(-1)] = value; }
+function completeRecommendationFactors(factors, rec) {
+  const f = JSON.parse(JSON.stringify(factors || {}));
+  f.historical ||= {}; f.demand ||= {}; f.pace ||= {}; f.cancellations ||= {}; f.market ||= {}; f.calendar ||= {}; f.weather ||= {}; f.channels ||= {}; f.channels.mix ||= {}; f.property ||= {}; f.capacity ||= {}; f.guardrails ||= {}; f.uncertainty ||= {}; f.priceResponse ||= {}; f.decision ||= {};
+  Object.assign(f.pace, { cancellationPickupRooms: f.pace.cancellationPickupRooms ?? 0, daysSincePriorSnapshot: f.pace.daysSincePriorSnapshot ?? 1 });
+  f.historical.pickupRooms ??= f.pace.pickupRooms ?? 0; f.historical.comparablePeriod ||= 'Comparable recent dates';
+  Object.assign(f.demand, { snapshotType: f.demand.snapshotType || 'On-the-books snapshot' });
+  Object.assign(f.market, { availability: f.market.availability?.startsWith('Available') ? 'Available' : 'Unconfirmed', matchedTerms: f.market.matchedTerms?.startsWith('Date/room') ? 'Matched' : 'Partial match' });
+  f.calendar.eventDistanceMiles ??= 0; f.calendar.eventConfidence ??= 0; f.calendar.eventIntensity ??= 0;
+  Object.assign(f.property, { roomClassOffset: f.property.roomClassOffset ?? 0, amenityOffset: f.property.amenityOffset ?? 0, ratePlan: f.property.ratePlan || 'Standard' });
+  f.property.amenities = Array.isArray(f.property.amenities) ? f.property.amenities.join(', ') : String(f.property.amenities || '');
+  Object.assign(f.capacity, { openDays: f.capacity.openDays ?? 7, openForSale: f.capacity.openForSale ?? true });
+  Object.assign(f.guardrails, { rateParityConstraint: f.guardrails.rateParityConstraint || 'Not configured', parityFloorRate: f.guardrails.parityFloorRate ?? 0, excludedDates: Boolean(f.guardrails.excludedDates), approvalPolicy: f.guardrails.approvalPolicy || 'Owner approval required' });
+  Object.assign(f.uncertainty, { forecastUncertaintyPct: f.uncertainty.forecastUncertaintyPct ?? Math.max(0, 100 - (f.uncertainty.confidence || rec.confidence)), dataFreshnessMinutes: f.uncertainty.dataFreshnessMinutes ?? 60 });
+  f.priceResponse.elasticity = Number.isFinite(Number(f.priceResponse.elasticity)) ? Number(f.priceResponse.elasticity) : -0.8;
+  f.decision.currentRate = Number(f.decision.currentRate ?? rec.current_rate);
+  for (const [path, type] of recommendationFactorInputs) {
+    const value = readPath(f, path);
+    if (type === 'number' && value !== undefined && value !== null) writePath(f, path, Number(value));
+  }
+  return f;
+}
+
+function calculateRecommendation(rec, submittedFactors) {
+  const factors = completeRecommendationFactors(submittedFactors, rec);
+  for (const [path, type] of recommendationFactorInputs) {
+    if (type === 'text' || type === 'boolean') continue;
+    const value = readPath(factors, path);
+    if (value !== undefined && value !== null && (!Number.isFinite(Number(value)) || Math.abs(Number(value)) > 1000000)) throw new Error(`Invalid value for ${path}.`);
+  }
+  const current = Math.max(1, Number(factors.decision.currentRate || rec.current_rate));
+  const floor = Math.max(1, Number(factors.guardrails.floor || 1), Number(factors.guardrails.parityFloorRate || 0));
+  const ceiling = Math.max(floor, Number(factors.guardrails.ceiling || 1000));
+  const maxStep = Math.max(0, Number(factors.guardrails.maxRateChange || 0));
+  const physicalRooms = Math.max(1, Number(factors.capacity.physicalRooms || factors.capacity.sellableRooms || 1));
+  const sellableRooms = Math.max(1, Math.min(Number(factors.capacity.sellableRooms || physicalRooms), physicalRooms - Math.max(0, Number(factors.capacity.outOfOrderRooms || 0))));
+  const projectedOcc = Number(factors.demand.forecastOccupancy || 0);
+  const forecastRoomOcc = Number(factors.demand.forecastRooms || 0) / sellableRooms * 100;
+  const otbRoomOcc = Number(factors.demand.onBooksRooms || 0) / sellableRooms * 100;
+  const demand = Math.min(100, Math.max(0, projectedOcc * 0.7 + forecastRoomOcc * 0.15 + otbRoomOcc * 0.15));
+  const pickup = Number(factors.pace.pickupRooms || 0) - Number(factors.pace.cancellationPickupRooms || 0);
+  const adr = Number(factors.historical.adr || current);
+  const historicalOcc = Number(factors.historical.occupancy || 0);
+  const revpar = Number(factors.historical.revpar || adr * historicalOcc / 100);
+  const historicalRoomRevenuePerRoom = Number(factors.historical.roomRevenue || 0) / physicalRooms;
+  const competitorRate = Number(factors.market.competitorRate || current);
+  const comparableMarket = factors.market.availability === 'Available' && factors.market.matchedTerms === 'Matched';
+  const marketFreshnessFactor = Number(factors.market.freshnessMinutes || 0) > 1440 ? 0.35 : Number(factors.market.freshnessMinutes || 0) > 360 ? 0.7 : 1;
+  const marketSampleFactor = Math.min(1, Math.max(0, Number(factors.market.sampleHotels || 0) / 4));
+  const marketSignal = comparableMarket ? Math.max(-6, Math.min(6, (competitorRate - current) * 0.12 * marketFreshnessFactor * marketSampleFactor)) : 0;
+  const eventDistance = Number(factors.calendar.eventDistanceMiles || 0);
+  const eventSignal = Number(factors.calendar.eventIntensity || 0) > 0 && eventDistance > 0
+    ? Math.min(4, Number(factors.calendar.eventIntensity) / 100 * Math.max(0, 1 - eventDistance / 25) * (Number(factors.calendar.eventConfidence || 0) / 100) * 5) : 0;
+  const daySignal = ['Friday', 'Saturday'].includes(factors.calendar.dayOfWeek) ? 3 : factors.calendar.dayOfWeek === 'Sunday' ? 1 : 0;
+  const seasonSignal = /peak|high|summer/i.test(factors.calendar.season) ? 2 : /low|off|winter/i.test(factors.calendar.season) ? -1 : 0;
+  const cancelDrag = Math.min(5, Number(factors.cancellations.cancellationRate || 0) * 0.12 + Number(factors.cancellations.noShowRate || 0) * 0.08 + Number(factors.pace.cancellationPickupRooms || 0) * 0.5);
+  const mix = factors.channels.mix;
+  const mixTotal = ['direct', 'brand', 'ota', 'other'].reduce((sum, key) => sum + Math.max(0, Number(mix[key] || 0)), 0) || 100;
+  const otaShare = Math.max(0, Number(mix.ota || 0)) / mixTotal;
+  const channelSignal = Math.min(2, otaShare * Number(factors.channels.commissionEstimatePct || 0) * 0.08);
+  const elasticityDamp = Math.min(1.5, Math.max(0.35, Math.abs(Number(factors.priceResponse.elasticity || -0.8)) / 0.8));
+  const quality = Math.min(1, Math.max(0.25, Number(factors.uncertainty.confidence ?? 50) / 100));
+  const freshness = Number(factors.uncertainty.dataFreshnessMinutes || 0) > 1440 ? 0.5 : 1;
+  const sourceQuality = /partial|stale|missing/i.test(factors.uncertainty.sourceQuality || '') ? 0.75 : 1;
+  const snapshotQuality = /manual|forecast/i.test(factors.demand.snapshotType || '') ? 0.9 : 1;
+  const leadTimeDamp = 0.65 + 0.35 * Math.min(1, 14 / Math.max(1, Number(factors.pace.leadTimeDays || 1)));
+  const staySignal = Math.min(1.5, Math.max(-1.5, (Number(factors.pace.lengthOfStayNights || 1) - 1) * 0.25));
+  const historicalSignal = (adr - current) * 0.08 + (historicalOcc - 65) * 0.06 + (revpar - adr * historicalOcc / 100) * 0.03 + (historicalRoomRevenuePerRoom - adr * historicalOcc / 100) * 0.02 + Number(factors.historical.pickupRooms || 0) * 0.12;
+  const scarcitySignal = sellableRooms > 0 ? Math.max(-1, Math.min(2, (1 - Number(factors.demand.remainingRooms || sellableRooms) / sellableRooms) * 2)) : 0;
+  const change = ((demand - 65) * 0.24 + pickup * 0.9 * leadTimeDamp + historicalSignal + scarcitySignal + staySignal + marketSignal + eventSignal + daySignal + seasonSignal + Number(factors.property.roomClassOffset || 0) + Number(factors.property.amenityOffset || 0) + channelSignal - cancelDrag) * elasticityDamp * quality * freshness * sourceQuality * snapshotQuality;
+  let suggested = current;
+  if (!factors.guardrails.excludedDates && factors.capacity.openForSale !== false) {
+    const upper = Math.max(floor, Math.min(ceiling, current + maxStep));
+    const lower = Math.min(upper, Math.max(floor, current - maxStep));
+    suggested = Math.round(Math.max(lower, Math.min(upper, current + change)));
+  }
+  factors.decision.currentRate = Math.round(current * 100) / 100;
+  factors.demand.forecastOccupancy = Math.round(demand * 10) / 10;
+  factors.demand.sellableRooms = sellableRooms;
+  factors.demand.forecastRooms = Math.min(sellableRooms, Math.max(0, Number(factors.demand.forecastRooms || (sellableRooms * demand / 100))));
+  factors.channels.netRateEstimate = Math.round(current * (1 - Number(factors.channels.commissionEstimatePct || 0) / 100) * 100) / 100;
+  factors.market.competitiveIndex = competitorRate > 0 ? Math.round(current / competitorRate * 1000) / 10 : null;
+  factors.property.amenities = String(factors.property.amenities || '').split(',').map(x => x.trim()).filter(Boolean);
+  factors.guardrails.changeApplied = suggested - current;
+  factors.guardrails.constrained = !factors.guardrails.excludedDates && (Math.abs(suggested - (current + change)) > 0.01);
+  factors.uncertainty.bandLow = Math.round(Math.max(floor, suggested - Math.max(2, Number(factors.uncertainty.forecastUncertaintyPct || 0) * 0.2)));
+  factors.uncertainty.bandHigh = Math.round(Math.min(ceiling, suggested + Math.max(2, Number(factors.uncertainty.forecastUncertaintyPct || 0) * 0.2)));
+  factors.recommendation ||= {};
+  factors.recommendation.method = 'Transparent demo rule: occupancy, pickup net of cancellations, historical ADR, comparable market signal, event/calendar context, channel cost, price response, data confidence and owner guardrails.';
+  factors.recommendation.optimization = 'Illustrative advisory calculation only; not a trained model, validated price-elasticity estimate, or live rate update.';
+  const drivers = [`Current/base rate: $${current.toFixed(0)}`, `Projected occupancy: ${demand.toFixed(1)}%`, `Net pickup: ${pickup >= 0 ? '+' : ''}${pickup} rooms`, `Historical performance: ADR $${adr.toFixed(0)}, occupancy ${historicalOcc.toFixed(1)}%`, ...(comparableMarket ? [`Comparable market context: $${competitorRate.toFixed(0)}`] : ['Market context excluded: availability or room/terms match not confirmed']), ...(factors.guardrails.excludedDates || factors.capacity.openForSale === false ? ['Rate held at current: date excluded or property closed'] : []), ...(factors.guardrails.constrained ? ['Owner rate guardrails applied'] : []), `Confidence/data quality dampening applied`];
+  const confidence = Math.round(quality * freshness * sourceQuality * snapshotQuality * 100);
+  return { currentRate: factors.decision.currentRate, recommendedRate: suggested, confidence, forecastOccupancy: demand, factors, drivers };
+}
+
 db.exec(`
 CREATE INDEX IF NOT EXISTS idx_locations_property ON locations(property_id);
 CREATE INDEX IF NOT EXISTS idx_room_categories_location ON room_categories(location_id);
@@ -131,6 +243,13 @@ if(!db.prepare("SELECT value FROM settings WHERE key='prediction_window_v2'").ge
   db.exec('DELETE FROM recommendations');
   insertRecommendations(seedRecommendationsData(db.prepare('SELECT * FROM properties ORDER BY id').all()));
   db.prepare("INSERT OR REPLACE INTO settings (key,value) VALUES ('prediction_window_v2','true')").run();
+}
+{
+  const updateFactors = db.prepare('UPDATE recommendations SET factors=? WHERE id=?');
+  for (const row of db.prepare('SELECT id,current_rate,confidence,factors FROM recommendations').all()) {
+    const completed = completeRecommendationFactors(JSON.parse(row.factors || '{}'), row);
+    updateFactors.run(JSON.stringify(completed), row.id);
+  }
 }
 
 function seedDatabase() {
@@ -383,17 +502,18 @@ function seedRecommendationsData(properties, start = new Date()) {
     const factors = {
       historical: { adr: historicalAdr, occupancy: historicalOccupancy, revpar: Math.round(historicalAdr * historicalOccupancy / 100 * 100) / 100, roomRevenue, roomRevenueBasis: 'Excluding tax · demo accounting basis', source: 'Seeded historical performance' },
       demand: { onBooksRooms: bookedRooms, sellableRooms, occupancy: Math.round(bookedRooms / sellableRooms * 1000) / 10, forecastOccupancy: demand, forecastRooms: Math.round(sellableRooms * demand / 100), remainingRooms: sellableRooms - bookedRooms, source: 'Seeded PMS / inventory snapshot' },
-      pace: { pickupRooms: pickup, priorSnapshotOccupancy: previousOccupancy, daysSincePriorSnapshot: 1, leadTimeDays: leadTime, lengthOfStayNights: 1 + (i % 4), source: 'Synthetic daily snapshot history · not client history' },
+      pace: { pickupRooms: pickup, priorSnapshotOccupancy: previousOccupancy, daysSincePriorSnapshot: 1, leadTimeDays: leadTime, lengthOfStayNights: 1 + (i % 4), cancellationPickupRooms: 0, source: 'Synthetic daily snapshot history · not client history' },
       cancellations: { cancellationRate, noShowRate, note: 'Separate demo estimates; not used as reliable client observations', source: 'Synthetic sample' },
       market: { competitorRate: competitor, competitiveIndex, availability: competitorAvailability, matchedTerms: competitorMatch, sampleHotels: 4 + (i % 2), collectedAt: `${new Date().toISOString().slice(0, 10)}T06:30:00Z`, freshnessMinutes: 45 + (i % 5) * 20, source: 'Illustrative comp-set sample · not a live quote' },
       calendar: { dayOfWeek: date.toLocaleDateString('en-US', { weekday: 'long' }), season: date.getMonth() >= 10 || date.getMonth() <= 1 ? 'Winter' : 'Fall', specialEvent: event ? 'Regional event · sample' : 'No configured event', eventIntensity, eventDistanceMiles: eventDistance, eventConfidence: event ? 67 : null, source: 'Calendar rule + sample event context' },
       weather: { severity: weatherSeverity, confidence: weatherConfidence, source: 'Illustrative local weather context' },
       channels: { mix: channelMix, commissionEstimatePct: channelCost, netRateEstimate: Math.round(current * (1 - channelCost / 100)), source: 'Illustrative mix and commission assumptions' },
-      property: { brand: p.brand, positioning, roomClass, amenities, amenitiesMapped: false, source: 'Property profile · amenities require confirmation' },
+      property: { brand: p.brand, positioning, roomClass, roomClassOffset: 0, amenities, amenitiesMapped: false, source: 'Property profile · amenities require confirmation' },
       capacity: { physicalRooms: p.rooms, outOfOrderRooms: outOfOrder, sellableRooms, oversellOptimizationEnabled: false, source: 'Seeded inventory rule · demo' },
-      guardrails: { floor, ceiling, maxRateChange: maxStep, changeApplied: suggested - current, constrained: guardrailApplied, source: 'Demo property constraints; replace with owner-approved values' },
-      uncertainty: { confidence, bandLow: Math.max(floor, suggested - (14 + (100 - confidence) * 0.4)), bandHigh: Math.min(ceiling, suggested + (14 + (100 - confidence) * 0.4)), dataFreshness: 'Demo snapshot · recent', sourceQuality: i % 9 === 0 ? 'Partial market match' : 'Seeded complete fields', recommendationPublishable: false, reasons: ['Illustrative model only', ...(i % 9 === 0 ? ['Competitor match incomplete'] : []), 'No client source data validated'] },
-      priceResponse: { elasticity: null, status: 'Not estimated', note: 'Requires sufficient history and validated price-response analysis' },
+      guardrails: { floor, ceiling, maxRateChange: maxStep, changeApplied: suggested - current, constrained: guardrailApplied, rateParityConstraint: 'Not configured', excludedDates: false, approvalPolicy: 'Owner approval required', source: 'Demo property constraints; replace with owner-approved values' },
+      uncertainty: { confidence, bandLow: Math.max(floor, suggested - (14 + (100 - confidence) * 0.4)), bandHigh: Math.min(ceiling, suggested + (14 + (100 - confidence) * 0.4)), forecastUncertaintyPct: 100 - confidence, dataFreshnessMinutes: 60, dataFreshness: 'Demo snapshot · recent', sourceQuality: i % 9 === 0 ? 'Partial market match' : 'Seeded complete fields', recommendationPublishable: false, reasons: ['Illustrative model only', ...(i % 9 === 0 ? ['Competitor match incomplete'] : []), 'No client source data validated'] },
+      priceResponse: { elasticity: -0.8, status: 'Illustrative assumption · validate before use', note: 'Requires sufficient history and validated price-response analysis' },
+      decision: { currentRate: current, ratePlan: 'Standard', source: 'Seeded current/base rate' },
       recommendation: { method: 'Transparent demand baseline + calendar/market sample adjustments + rate constraints', demandSignal: demand > 79 ? 'High' : demand < 51 ? 'Soft' : 'Steady', marketAdjustment: competitor > current ? 'Below sample market rate' : 'At/above sample market rate', eventAdjustment: event ? '+$7 illustrative event adjustment' : '$0 event adjustment', optimization: 'Expected net room revenue objective is a future stage; this demo does not claim revenue optimization' },
     };
     const drivers = [
@@ -615,12 +735,32 @@ app.get('/api/recommendations', (req, res) => {
   const rows = propertyId ? db.prepare('SELECT * FROM recommendations WHERE property_id=? ORDER BY stay_date').all(propertyId) : db.prepare('SELECT * FROM recommendations ORDER BY stay_date,property_id').all();
   res.json(rows.map(r => ({ ...r, drivers: JSON.parse(r.drivers), factors: JSON.parse(r.factors || '{}') })));
 });
+app.post('/api/recommendations/:id/recalculate', (req, res) => {
+  const id = Number(req.params.id);
+  const rec = db.prepare('SELECT * FROM recommendations WHERE id=?').get(id);
+  if (!rec) return res.status(404).json({ error: 'Recommendation not found.' });
+  try {
+    const submitted = req.body?.factors;
+    if (!submitted || typeof submitted !== 'object' || Array.isArray(submitted)) return res.status(400).json({ error: 'Editable factor values are required.' });
+    const result = calculateRecommendation(rec, submitted);
+    db.prepare('UPDATE recommendations SET current_rate=?,recommended_rate=?,forecast_occupancy=?,confidence=?,factors=?,drivers=?,status=\'Pending\' WHERE id=?')
+      .run(result.currentRate, result.recommendedRate, result.forecastOccupancy, result.confidence, JSON.stringify(result.factors), JSON.stringify(result.drivers), id);
+    db.prepare('INSERT INTO activity (action,detail) VALUES (?,?)').run('Rate recalculated', `${rec.day_label} · $${result.currentRate} → $${result.recommendedRate} · owner edited factors`);
+    const updated = db.prepare('SELECT * FROM recommendations WHERE id=?').get(id);
+    res.json({ ...updated, drivers: JSON.parse(updated.drivers), factors: JSON.parse(updated.factors) });
+  } catch (error) { res.status(400).json({ error: error.message || 'Could not recalculate this recommendation.' }); }
+});
 app.patch('/api/recommendations/:id', (req, res) => {
   const id = Number(req.params.id), { status, rate, reason } = req.body || {};
   if (!['Approved', 'Edited', 'Rejected', 'Pending'].includes(status)) return res.status(400).json({ error: 'Invalid recommendation status.' });
   const rec = db.prepare('SELECT * FROM recommendations WHERE id=?').get(id);
   if (!rec) return res.status(404).json({ error: 'Recommendation not found.' });
-  const nextRate = Number.isFinite(Number(rate)) ? Number(rate) : rec.recommended_rate;
+  const factors = completeRecommendationFactors(JSON.parse(rec.factors || '{}'), rec);
+  const floor = Math.max(1, Number(factors.guardrails.floor || 1), Number(factors.guardrails.parityFloorRate || 0));
+  const ceiling = Math.max(floor, Number(factors.guardrails.ceiling || 1000));
+  const nextRate = rate === undefined ? rec.recommended_rate : Number(rate);
+  if (!Number.isFinite(nextRate)) return res.status(400).json({ error: 'Enter a valid rate before approving.' });
+  if (nextRate < floor || nextRate > ceiling) return res.status(400).json({ error: `The approved rate must stay within the $${floor}–$${ceiling} rate guardrails.` });
   db.prepare('UPDATE recommendations SET status=?,recommended_rate=? WHERE id=?').run(status, nextRate, id);
   db.prepare('INSERT INTO activity (action,detail) VALUES (?,?)').run(`Rate ${status.toLowerCase()}`, `${rec.day_label} · $${nextRate} · ${reason || 'Owner review'}`);
   res.json({ success: true });
