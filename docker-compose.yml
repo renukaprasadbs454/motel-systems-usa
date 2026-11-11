@@ -1,0 +1,28 @@
+services:
+  api:
+    build: .
+    command: npm run server
+    environment:
+      PORT: 4000
+      JWT_SECRET: ${JWT_SECRET:-exora-local-docker-demo-secret}
+      DEMO_EMAIL: ${DEMO_EMAIL:-owner@exora.demo}
+      DEMO_PASSWORD: ${DEMO_PASSWORD:-exora-demo}
+    ports:
+      - "4000:4000"
+    volumes:
+      - exora-demo-data:/app/server/data
+    restart: unless-stopped
+
+  web:
+    build: .
+    command: npm run client -- --host 0.0.0.0
+    environment:
+      API_PROXY_TARGET: http://api:4000
+    ports:
+      - "5173:5173"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  exora-demo-data:

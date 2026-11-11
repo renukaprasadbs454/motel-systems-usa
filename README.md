@@ -45,6 +45,30 @@ A local demonstration dashboard for hotel owners, built with React, Vite, Node.j
 
 The Express API runs on [http://localhost:4000](http://localhost:4000). The frontend proxies `/api` requests to it.
 
+## Run with Docker
+
+Install and start Docker Desktop, then run these commands from the project folder:
+
+```powershell
+docker compose up --build
+```
+
+Open [http://localhost:5173](http://localhost:5173). Sign in with `owner@exora.demo` / `exora-demo`. The API is available at [http://localhost:4000](http://localhost:4000). The included SQLite demo database is stored in a named Docker volume and remains available after containers stop.
+
+Stop the containers while keeping the demo database:
+
+```powershell
+docker compose down
+```
+
+To reset the database and restore the original seeded demo data, remove the named volume too:
+
+```powershell
+docker compose down --volumes
+```
+
+Run in the background with `docker compose up --build --detach`, and view logs with `docker compose logs --follow`.
+
 ## Demo database
 
 The seeded SQLite database is included at `server/data/exora-demo.db`. The API opens this file on startup. If the database is absent or empty, the server creates the schema and inserts demo seed records automatically. Local changes made in the demo are stored in this SQLite file.
