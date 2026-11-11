@@ -244,6 +244,7 @@ if(!db.prepare("SELECT value FROM settings WHERE key='prediction_window_v2'").ge
   insertRecommendations(seedRecommendationsData(db.prepare('SELECT * FROM properties ORDER BY id').all()));
   db.prepare("INSERT OR REPLACE INTO settings (key,value) VALUES ('prediction_window_v2','true')").run();
 }
+extendDailyMetricsThroughToday();
 {
   const updateFactors = db.prepare('UPDATE recommendations SET factors=? WHERE id=?');
   for (const row of db.prepare('SELECT id,current_rate,confidence,factors FROM recommendations').all()) {
@@ -284,6 +285,28 @@ function seedDatabase() {
     }
   }
   db.prepare('INSERT INTO settings (key,value) VALUES (?,?)').run('demo_mode', 'true');
+}
+
+function extendDailyMetricsThroughToday() {
+  const latestDay=db.prepare('SELECT MAX(day) AS day FROM daily_metrics').get()?.day;
+  if(!latestDay)return;
+  const cursor=new Date(`${latestDay}T12:00:00`),today=new Date(`${hotelTodayString()}T12:00:00`);
+  const insert=db.prepare('INSERT INTO daily_metrics (property_id,day,revenue,occupancy,adr,rooms_sold) VALUES (?,?,?,?,?,?)');
+  const exists=db.prepare('SELECT 1 FROM daily_metrics WHERE property_id=? AND day=? LIMIT 1');
+  const properties=db.prepare('SELECT id,rooms,occupancy,adr FROM properties ORDER BY id').all();
+  let step=0;
+  while(cursor<today){
+    cursor.setDate(cursor.getDate()+1);step++;
+    const day=cursor.toISOString().slice(0,10);
+    for(const property of properties){
+      if(exists.get(property.id,day))continue;
+      const weekend=cursor.getDay()===5||cursor.getDay()===6?7:-2;
+      const occupancy=Math.max(32,Math.min(94,Math.round((property.occupancy+Math.sin((step+3)/3)*7+weekend)*10)/10));
+      const roomsSold=Math.round(property.rooms*occupancy/100);
+      const adr=Math.max(55,Math.round(property.adr+Math.cos((step+2)/4)*7));
+      insert.run(property.id,day,roomsSold*adr,occupancy,adr,roomsSold);
+    }
+  }
 }
 
 function seedRecommendations() {
@@ -564,7 +587,7 @@ app.use('/api', auth);
 
 app.get('/api/overview', (_req, res) => {
   const properties = db.prepare('SELECT * FROM properties ORDER BY id').all();
-  const metrics = db.prepare(`SELECT property_id,day,revenue,occupancy,adr,rooms_sold FROM daily_metrics WHERE day >= date('now','-13 days') ORDER BY day,property_id`).all();
+  const metrics = db.prepare(`SELECT property_id,day,revenue,occupancy,adr,rooms_sold FROM daily_metrics WHERE day >= date('now','-19 days') ORDER BY day,property_id`).all();
   const alertCount = db.prepare("SELECT COUNT(*) AS count FROM alerts WHERE status='Open'").get().count;
   const pendingCount = db.prepare("SELECT COUNT(*) AS count FROM recommendations WHERE status='Pending'").get().count;
   const today = properties.reduce((sum, p) => sum + p.revenue, 0);
@@ -766,9 +789,13 @@ app.patch('/api/recommendations/:id', (req, res) => {
   res.json({ success: true });
 });
 
-app.get('/api/alerts', (_req, res) => res.json(db.prepare('SELECT a.*,p.name AS property_name FROM alerts a LEFT JOIN properties p ON p.id=a.property_id ORDER BY CASE severity WHEN \'High\' THEN 1 WHEN \'Medium\' THEN 2 ELSE 3 END,id').all()));
+app.get('/api/alerts', (_req, res) => res.json(db.prepare("SELECT a.*,p.name AS property_name FROM alerts a LEFT JOIN properties p ON p.id=a.property_id WHERE a.status='Open' ORDER BY CASE severity WHEN 'High' THEN 1 WHEN 'Medium' THEN 2 ELSE 3 END,id").all()));
 app.patch('/api/alerts/:id', (req, res) => {
+  const alert=db.prepare('SELECT title,property_id FROM alerts WHERE id=?').get(Number(req.params.id));
+  if(!alert)return res.status(404).json({error:'Alert not found.'});
   db.prepare("UPDATE alerts SET status='Resolved' WHERE id=?").run(Number(req.params.id));
+  const property=db.prepare('SELECT name FROM properties WHERE id=?').get(alert.property_id);
+  db.prepare('INSERT INTO activity (action,detail) VALUES (?,?)').run('Alert resolved',`${alert.title} · ${property?.name||'Portfolio'}`);
   res.json({ success: true });
 });
 app.get('/api/metrics', (_req, res) => res.json(db.prepare('SELECT m.*,p.name AS property_name FROM daily_metrics m JOIN properties p ON p.id=m.property_id ORDER BY day,property_id').all()));
